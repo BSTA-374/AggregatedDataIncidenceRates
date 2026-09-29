@@ -1,0 +1,114 @@
+[
+  {
+    "objectID": "index.html",
+    "href": "index.html",
+    "title": "Aggregated Data and Incidence Rates",
+    "section": "",
+    "text": "Get the source. Download index.qmd — open it in RStudio and run the chunks alongside this page."
+  },
+  {
+    "objectID": "index.html#lets-back-up-a-bit",
+    "href": "index.html#lets-back-up-a-bit",
+    "title": "Aggregated Data and Incidence Rates",
+    "section": "Let’s back up a bit",
+    "text": "Let’s back up a bit\nIn the first week of the semester, we discussed rates. When cases become counts, counts become rates, and rates become something that can fairly be compared across areas with different populations. This is related to Assignment 4 and the input for most pattern analysis we will do afterwards: Moran’s I, cluster detection, and the Bayesian models all start from observed and expected counts.\nImportant reading: Moraga 5.2. We will be using the same Pennsylvania lung cancer data in the second part of this notebook.\n\nlibrary(sf)\nlibrary(dplyr)\nlibrary(tidyr)\nlibrary(ggplot2)\nlibrary(patchwork)\nlibrary(SpatialEpi)   # pennLC data; expected()\n\ntheme_set(theme_classic(base_size = 12))\n\n\n\n\n\n\n\nNote\n\n\n\nIf SpatialEpi is missing, install.packages(\"SpatialEpi\") once."
+  },
+  {
+    "objectID": "index.html#why-aggregate-at-all",
+    "href": "index.html#why-aggregate-at-all",
+    "title": "Aggregated Data and Incidence Rates",
+    "section": "1.1 Why aggregate at all",
+    "text": "1.1 Why aggregate at all\nHealth data rarely arrive as the counts we map. They arrive as records: a diagnosis, a death certificate, an address. We (or epidemiologists) aggregate them to areas for three reasons. Denominators — the population at risk — exist only for areas, from the census. Confidentiality rules usually forbid releasing point locations. And most reporting (state registries, CDC WONDER) is area-based already."
+  },
+  {
+    "objectID": "index.html#aggregating-points-a-worked-example-from-north-carolina",
+    "href": "index.html#aggregating-points-a-worked-example-from-north-carolina",
+    "title": "Aggregated Data and Incidence Rates",
+    "section": "1.2 Aggregating points: a worked example from North Carolina",
+    "text": "1.2 Aggregating points: a worked example from North Carolina\nReal case addresses are confidential, so in this example we fabricate them. We scatter a set of 667 SIDS deaths of 1974–78 at random inside their North Carolina counties, then pretend we received only the points.\n\n\nCode\nnc &lt;- st_read(system.file(\"shape/nc.shp\", package = \"sf\"), quiet = TRUE) |&gt;\n  st_transform(32119)                           # NC State Plane, metres\n\nset.seed(374)\ncases &lt;- st_sample(nc, size = nc$SID74) |&gt;      # one point per death\n  st_sf() |&gt;\n  mutate(case_id = row_number())\n\nnrow(cases)\n\n\n[1] 671\n\n\nAggregation is a point-in-polygon operation. Before running it, one check that saves more grief than any other:\n\n\nCode\nst_crs(cases) == st_crs(nc)                     # must be TRUE\n\n\n[1] TRUE\n\n\n(note: If the two layers are in different CRSs, sf will stop you — but only if both CRSs are declared. A shapefile with a missing .prj fails silently).\n\n1.2.1 Counting points in polygons\nst_intersects() returns, for each county, the points inside it; lengths() counts them. Counties with no cases get a zero.\n\n\nCode\nnc$n_cases &lt;- lengths(st_intersects(nc, cases))\n\nsum(nc$n_cases)                                 # should equal nrow(cases)\n\n\n[1] 671"
+  },
+  {
+    "objectID": "index.html#counts-are-not-risk",
+    "href": "index.html#counts-are-not-risk",
+    "title": "Aggregated Data and Incidence Rates",
+    "section": "1.3 Counts are not risk",
+    "text": "1.3 Counts are not risk\n\n\nCode\np1 &lt;- ggplot() +\n  geom_sf(data = nc, fill = \"grey95\", colour = \"grey70\", linewidth = 0.2) +\n  geom_sf(data = cases, size = 0.4, colour = \"#b2182b\") +\n  labs(title = \"Cases (synthetic locations)\")\n\np2 &lt;- ggplot(nc) +\n  geom_sf(aes(fill = n_cases), colour = \"grey40\", linewidth = 0.1) +\n  scale_fill_distiller(palette = \"Reds\", direction = 1, name = \"Cases\") +\n  labs(title = \"Counts\")\n\np3 &lt;- ggplot(nc) +\n  geom_sf(aes(fill = BIR74), colour = \"grey40\", linewidth = 0.1) +\n  scale_fill_distiller(palette = \"Greys\", direction = 1, name = \"Births\") +\n  labs(title = \"Births\")\n\np1 / p2 / p3 & theme_void(base_size = 12)\n\n\n\n\n\n\n\n\nFigure 1: Case locations, county counts, and births. The counts mostly redraw the population.\n\n\n\n\n\nThe count map is mostly a population map: Mecklenburg, Wake, and Guilford have many deaths because they have many births. A count needs a denominator before it says anything about risk — which is where the rest of today begins."
+  },
+  {
+    "objectID": "index.html#three-measures-three-questions",
+    "href": "index.html#three-measures-three-questions",
+    "title": "Aggregated Data and Incidence Rates",
+    "section": "2.1 Three measures, three questions",
+    "text": "2.1 Three measures, three questions\nIncidence counts new cases arising in a population over a period of time. Prevalence counts existing cases at a point (or short window) in time (~cross-section, snapshot). Mortality counts deaths, and is an incidence measure whose event is death. For surveillance and aetiology we usually want incidence; prevalence mixes incidence with duration, so a disease that lasts longer looks more common even if it arises no more often.\nIncidence itself comes in two forms, and the distinction matters for the denominator.\n\n\n\n\n\n\n\n\n\nMeasure\nNumerator\nDenominator\nUnits\n\n\n\n\nCumulative incidence (risk)\nnew cases in period\npopulation at risk at start\nproportion, over a stated period\n\n\nIncidence rate\nnew cases in period\nperson-time at risk\ncases per person-year\n\n\nPoint prevalence\nexisting cases\ntotal population\nproportion"
+  },
+  {
+    "objectID": "index.html#person-time",
+    "href": "index.html#person-time",
+    "title": "Aggregated Data and Incidence Rates",
+    "section": "2.2 Person-time",
+    "text": "2.2 Person-time\nThe incidence rate divides by the total time individuals spent at risk. Ten thousand people followed for five years contribute roughly 50,000 person-years; 50 new cases gives a rate of 1 per 1,000 person-years. For area data we never observe individual follow-up, so person-time is approximated as\n\\[\n\\text{person-years}_i \\approx \\text{mid-period population}_i \\times \\text{years in period}.\n\\]\nFor a single calendar year, the mid-year population is the person-time approximation, which is why annual registry rates are expressed “per 100,000 population”.\n\n\n\n\n\n\nWarningRead the denominator before the number\n\n\n\nThe NC SIDS rate is deaths per 1,000 live births — a proportion of a birth cohort, not a rate per person-year. The 1974–78 and 1979–84 periods are five and six years long, yet their rates per 1,000 births are comparable because births, not years, are the denominator. Divide deaths by BIR74 * 5 and you have produced a number with no clear meaning."
+  },
+  {
+    "objectID": "index.html#pennsylvania-lung-cancer-2002",
+    "href": "index.html#pennsylvania-lung-cancer-2002",
+    "title": "Aggregated Data and Incidence Rates",
+    "section": "3.1 Pennsylvania lung cancer, 2002",
+    "text": "3.1 Pennsylvania lung cancer, 2002\nThe pennLC data give lung cancer cases and population for each of Pennsylvania’s 67 counties in 2002, split into 16 strata: race (white, other), sex, and four age groups.\n\n\nCode\ndata(pennLC)\n\nd &lt;- pennLC$data |&gt;\n  mutate(age = factor(age, levels = c(\"Under.40\", \"40.59\", \"60.69\", \"70+\")))\n\nhead(d, 8)\n\n\n\n\n\n\ncounty\ncases\npopulation\nrace\ngender\nage\n\n\n\n\nadams\n0\n1492\no\nf\nUnder.40\n\n\nadams\n0\n365\no\nf\n40.59\n\n\nadams\n1\n68\no\nf\n60.69\n\n\nadams\n0\n73\no\nf\n70+\n\n\nadams\n0\n23351\nw\nf\nUnder.40\n\n\nadams\n5\n12136\nw\nf\n40.59\n\n\nadams\n5\n3609\nw\nf\n60.69\n\n\nadams\n18\n5411\nw\nf\n70+\n\n\n\n\n\n\n\n\nCode\npa &lt;- st_as_sf(pennLC$spatial.polygon) |&gt;\n  st_set_crs(4326) |&gt;\n  mutate(county = names(pennLC$spatial.polygon))\n\n\nThe crude rate ignores strata: all cases over all people.\n\\[\n\\text{crude}_i = \\frac{O_i}{P_i} \\times 100{,}000\n\\]\n\n\nCode\ncounty &lt;- d |&gt;\n  group_by(county) |&gt;\n  summarise(\n    O    = sum(cases),                                         # observed\n    pop  = sum(population),\n    p60  = sum(population[age %in% c(\"60.69\", \"70+\")]) / pop,  # share aged 60+\n    .groups = \"drop\"\n  ) |&gt;\n  mutate(crude = 1e5 * O / pop)\n\npa_rate &lt;- 1e5 * sum(county$O) / sum(county$pop)               # statewide\npa_rate\n\n\n[1] 83.69803"
+  },
+  {
+    "objectID": "index.html#what-the-crude-rate-is-really-measuring",
+    "href": "index.html#what-the-crude-rate-is-really-measuring",
+    "title": "Aggregated Data and Incidence Rates",
+    "section": "3.2 What the crude rate is really measuring",
+    "text": "3.2 What the crude rate is really measuring\nLung cancer risk rises steeply with age. The stratum-specific rates show how steeply:\n\n\nCode\nd |&gt;\n  group_by(age) |&gt;\n  summarise(cases = sum(cases), pop = sum(population)) |&gt;\n  mutate(rate_per_100k = round(1e5 * cases / pop, 1))\n\n\n\n\n\n\nage\ncases\npop\nrate_per_100k\n\n\n\n\nUnder.40\n61\n6528556\n0.9\n\n\n40.59\n1883\n3321677\n56.7\n\n\n60.69\n2568\n992312\n258.8\n\n\n70+\n5767\n1438509\n400.9\n\n\n\n\n\n\nA county whose residents are older will therefore have a higher crude rate even if every age group in it faces exactly the statewide risk. The crude rate is a weighted average of the stratum-specific rates, and the weights are the county’s own age structure.\n\n\nCode\nggplot(county, aes(p60, crude)) +\n  geom_point(aes(size = pop), alpha = 0.5, colour = \"steelblue\") +\n  geom_smooth(method = \"lm\", se = FALSE, colour = \"grey30\", linewidth = 0.6) +\n  scale_x_continuous(labels = scales::percent) +\n  labs(x = \"Population aged 60+\", y = \"Crude rate per 100,000\", size = \"Population\")\n\n\n\n\n\n\n\n\nFigure 2: Crude rates partly track age structure.\n\n\n\n\n\nThe association is modest (r ≈ 0.3) — smoking and other exposures vary too — but it is enough to reorder counties, as we will see. Comparing crude rates thus confounds risk with demography. Standardization removes that confounding, in one of two ways."
+  },
+  {
+    "objectID": "index.html#expected-counts",
+    "href": "index.html#expected-counts",
+    "title": "Aggregated Data and Incidence Rates",
+    "section": "4.1 Expected counts",
+    "text": "4.1 Expected counts\nReverse the logic. Instead of applying local rates to a standard population, apply reference rates \\(r_j\\) to the local population \\(n_{ij}\\). The result is the number of cases area \\(i\\) would have had if each of its strata experienced the reference risk:\n\\[\nE_i = \\sum_j r_j\\, n_{ij}, \\qquad r_j = \\frac{\\sum_i O_{ij}}{\\sum_i n_{ij}} .\n\\]\nOnly the reference rates need to be stable, and they are computed from the whole state. Each county contributes nothing but its population counts.\n\n\nCode\nref &lt;- d |&gt;\n  group_by(race, gender, age) |&gt;\n  summarise(r_ref = sum(cases) / sum(population), .groups = \"drop\")  # 16 rates\n\nE_tbl &lt;- d |&gt;\n  left_join(ref, by = c(\"race\", \"gender\", \"age\")) |&gt;\n  group_by(county) |&gt;\n  summarise(E = sum(population * r_ref))\n\n\nSpatialEpi::expected() does the same thing, as in Moraga 5.2. It assumes the rows are sorted by area and then by strata in the same order within every area; nothing checks this for you.\n\n\nCode\nd_sorted &lt;- d |&gt; arrange(county, race, gender, age)\n\nE_se &lt;- expected(\n  population = d_sorted$population,\n  cases      = d_sorted$cases,\n  n.strata   = 16\n)\n\nall.equal(E_tbl$E, E_se)                        # identical\n\n\n[1] TRUE\n\n\nBecause the reference rates come from these same data (internal standardization), expected counts sum to observed counts:\n\n\nCode\nc(observed = sum(county$O), expected = sum(E_tbl$E))\n\n\nobserved expected \n   10279    10279"
+  },
+  {
+    "objectID": "index.html#the-sir-and-the-smr",
+    "href": "index.html#the-sir-and-the-smr",
+    "title": "Aggregated Data and Incidence Rates",
+    "section": "4.2 The SIR (and the SMR)",
+    "text": "4.2 The SIR (and the SMR)\n\\[\n\\text{SIR}_i = \\frac{O_i}{E_i}\n\\]\nAn SIR of 1 means the county had as many cases as its demography predicts; 1.2 means 20% more; 0.8 means 20% fewer. For deaths the same ratio is called the SMR. The indirectly standardized rate puts it back on the rate scale: \\(\\text{SIR}_i \\times\\) the reference crude rate.\n\n\nCode\ncounty &lt;- county |&gt;\n  left_join(E_tbl, by = \"county\") |&gt;\n  mutate(\n    SIR   = O / E,\n    lower = qchisq(0.025, 2 * O) / (2 * E),          # exact Poisson 95% CI\n    upper = qchisq(0.975, 2 * (O + 1)) / (2 * E)\n  )\n\nsummary(county$SIR)\n\n\n   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. \n 0.3203  0.8251  0.9555  0.9316  1.0590  1.3747"
+  },
+  {
+    "objectID": "index.html#mapping-the-sir",
+    "href": "index.html#mapping-the-sir",
+    "title": "Aggregated Data and Incidence Rates",
+    "section": "4.3 Mapping the SIR",
+    "text": "4.3 Mapping the SIR\nAn SIR has a natural midpoint at 1, so a diverging palette is defensible here (unlike most rates — recall Week 1). Breaks are symmetric on the ratio scale.\n\n\nCode\npa_map &lt;- pa |&gt; left_join(county, by = \"county\")\n\nsir_breaks &lt;- c(0, 0.67, 0.83, 0.95, 1.05, 1.2, 1.5, Inf)\n\nggplot(pa_map) +\n  geom_sf(aes(fill = cut(SIR, sir_breaks)), colour = \"white\", linewidth = 0.2) +\n  scale_fill_brewer(palette = \"RdBu\", direction = -1, drop = FALSE, name = \"SIR\") +\n  theme_void()\n\n\n\n\n\n\n\n\nFigure 3: Raw SIRs for lung cancer, Pennsylvania 2002, standardized by race, sex, and age."
+  },
+  {
+    "objectID": "index.html#the-idea",
+    "href": "index.html#the-idea",
+    "title": "Aggregated Data and Incidence Rates",
+    "section": "5.1 The idea",
+    "text": "5.1 The idea\nAsk: what would each county’s rate be if it had the age structure of a common standard population? Apply the county’s own stratum-specific rates \\(r_{ij}\\) to a fixed set of standard weights \\(w_j\\):\n\\[\n\\text{DSR}_i = \\sum_j r_{ij}\\, w_j, \\qquad \\sum_j w_j = 1 .\n\\]\nThe standard can be the study population (here, Pennsylvania), an external one (the US 2000 standard population is common in US reporting), or any other fixed reference. Its choice changes the level of the DSRs; it rarely changes their ordering much.\n\n\nCode\nstd &lt;- d |&gt;\n  group_by(age) |&gt;\n  summarise(w = sum(population)) |&gt;\n  mutate(w = w / sum(w))                        # PA age structure\n\ncells &lt;- d |&gt;\n  group_by(county, age) |&gt;\n  summarise(cases = sum(cases), pop = sum(population), .groups = \"drop\") |&gt;\n  mutate(r = cases / pop)                       # county x age rates\n\ndsr &lt;- cells |&gt;\n  left_join(std, by = \"age\") |&gt;\n  group_by(county) |&gt;\n  summarise(dsr = 1e5 * sum(r * w))\n\ncounty &lt;- county |&gt; left_join(dsr, by = \"county\")\n\n\nWe standardized by age only, four strata. With all 16 strata, many cells would hold one or two people of “other” race aged 70+ in a rural county."
+  },
+  {
+    "objectID": "index.html#the-weakness-for-small-areas",
+    "href": "index.html#the-weakness-for-small-areas",
+    "title": "Aggregated Data and Incidence Rates",
+    "section": "5.2 The weakness for small areas",
+    "text": "5.2 The weakness for small areas\nDirect standardization needs a stable rate in every stratum of every area.\n\n\nCode\ncells |&gt;\n  group_by(age) |&gt;\n  summarise(counties_with_under_5_cases = sum(cases &lt; 5))\n\n\n\n\n\n\nage\ncounties_with_under_5_cases\n\n\n\n\nUnder.40\n65\n\n\n40.59\n12\n\n\n60.69\n6\n\n\n70+\n4\n\n\n\n\n\n\nAlmost every county has fewer than five cases under 40, and a dozen more are that sparse at 40–59. The under-40 cells matter little here only because their rate is tiny; in general the DSR inherits the noise of its sparsest strata. This is why direct standardization dominates national and state reporting — large populations, published stratum rates — while disease mapping relies on the indirect method."
+  },
+  {
+    "objectID": "index.html#crude-versus-standardized",
+    "href": "index.html#crude-versus-standardized",
+    "title": "Aggregated Data and Incidence Rates",
+    "section": "5.3 Crude versus standardized",
+    "text": "5.3 Crude versus standardized\nThe ranking of counties changes once age is accounted for:\n\n\nCode\ncounty |&gt;\n  mutate(rank_crude = rank(-crude), rank_SIR = rank(-SIR)) |&gt;\n  filter(county %in% c(\"schuylkill\", \"forest\", \"monroe\", \"bucks\",\n                       \"philadelphia\", \"lehigh\", \"northampton\")) |&gt;\n  transmute(county, p60 = round(p60, 3), crude = round(crude, 1),\n            SIR = round(SIR, 2), rank_crude, rank_SIR)\n\n\n\n\n\n\ncounty\np60\ncrude\nSIR\nrank_crude\nrank_SIR\n\n\n\n\nbucks\n0.163\n76.0\n1.06\n43\n18\n\n\nforest\n0.275\n80.9\n0.74\n31\n60\n\n\nlehigh\n0.198\n80.7\n0.97\n32\n29\n\n\nmonroe\n0.164\n79.3\n1.10\n37\n10\n\n\nnorthampton\n0.197\n88.4\n1.06\n19\n16\n\n\nphiladelphia\n0.179\n93.2\n1.16\n14\n5\n\n\nschuylkill\n0.244\n90.5\n0.92\n16\n39\n\n\n\n\n\n\nSchuylkill has one of the higher crude rates in the state and an SIR below 1: an old population, not an unusual risk. Monroe and Bucks move the other way. Philadelphia’s crude rate is only modestly above the state average, yet its SIR ranks among the highest once its younger and more diverse population is accounted for.\n\n\nCode\nq1 &lt;- ggplot(county, aes(crude, SIR)) +\n  geom_point(aes(colour = p60), size = 2) +\n  scale_colour_viridis_c(labels = scales::percent, name = \"Aged 60+\") +\n  geom_hline(yintercept = 1, linetype = \"dashed\") +\n  labs(x = \"Crude rate per 100,000\", y = \"SIR\")\n\nq2 &lt;- ggplot(county, aes(dsr, SIR * pa_rate)) +\n  geom_abline(linetype = \"dashed\") +\n  geom_point(colour = \"steelblue\", size = 2) +\n  labs(x = \"Directly standardized rate\", y = \"Indirectly standardized rate\")\n\nq1 | q2\n\n\n\n\n\n\n\n\nFigure 4: Left: crude rate vs. SIR. Right: indirect vs. direct standardization.\n\n\n\n\n\nThe two standardizations agree closely here because the standard population and the study population are the same. They will not always.\n\n\n\n\n\n\nImportantStrictly, SIRs compare each area to the reference — not to each other\n\n\n\nEach \\(E_i\\) is built on area \\(i\\)’s own population weights, so two SIRs are comparable only insofar as the stratum-specific rate ratios are roughly constant across strata. DSRs share a single set of weights and are directly comparable. In practice we map SIRs anyway, and the Bayesian models of Weeks 8–9 are built on \\(O_i\\) and \\(E_i\\); just do not over-read small differences between neighbouring counties."
+  },
+  {
+    "objectID": "index.html#precision-is-not-uniform",
+    "href": "index.html#precision-is-not-uniform",
+    "title": "Aggregated Data and Incidence Rates",
+    "section": "5.4 Precision is not uniform",
+    "text": "5.4 Precision is not uniform\n\n\nCode\nggplot(county, aes(SIR, reorder(county, E))) +\n  geom_vline(xintercept = 1, linetype = \"dashed\") +\n  geom_linerange(aes(xmin = lower, xmax = upper), colour = \"grey60\") +\n  geom_point(aes(size = E), colour = \"#b2182b\") +\n  labs(x = \"SIR (95% CI)\", y = NULL, size = \"Expected\") +\n  theme(axis.text.y = element_text(size = 6))\n\n\n\n\n\n\n\n\nFigure 5: SIRs with exact 95% intervals, ordered by expected count.\n\n\n\n\n\nForest, Cameron, and Sullivan each expect fewer than ten cases; their SIRs span most of the map’s colour range and their intervals span nearly all of the plausible range. Philadelphia and Allegheny expect over a thousand. The map colours them with the same confidence. That is Tuesday’s problem.\n\n\n\n\n\n\nNoteIf you use spdep::probmap()\n\n\n\nIt returns expected counts and a relative risk, but relRisk is scaled by 100: a county at the reference level has relRisk = 100, not 1. Divide by 100 before comparing it with an SIR, or thresholds such as “SIR &gt; 1.2” will flag nearly every county."
+  }
+]
