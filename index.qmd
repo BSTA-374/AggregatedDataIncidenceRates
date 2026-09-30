@@ -45,7 +45,6 @@ Important reading: **Moraga 5.2**. We will be using the same Pennsylvania lung c
 
 library(sf)
 library(dplyr)
-library(tidyr)
 library(ggplot2)
 library(patchwork)
 library(SpatialEpi)   # pennLC data; expected()
@@ -121,7 +120,7 @@ sum(nc$n_cases)                                 # should equal nrow(cases)
 
 ```{r}
 #| label: fig-counts
-#| fig-height: 5.5
+#| fig-height: 10
 #| fig-cap: "Case locations, county counts, and births. The counts mostly redraw the population."
 
 p1 <- ggplot() +
@@ -146,6 +145,34 @@ The count map is mostly a population map: Mecklenburg, Wake, and Guilford have
 many deaths because they have many births. A count needs a denominator before
 it says anything about risk --- which is where the rest of today begins.
 
+## From counts to a crude rate
+
+Dividing each county's count by its births gives the crude SIDS rate:
+
+$$
+\text{crude}_i = \frac{O_i}{\text{births}_i} \times 1{,}000
+$$
+
+```{r}
+#| label: fig-nc-crude
+#| fig-height: 4
+#| fig-cap: "Crude SIDS rate per 1,000 live births, North Carolina 1974--78."
+
+nc <- nc |>
+  mutate(crude = 1000 * n_cases / BIR74)        # per 1,000 births
+
+1000 * sum(nc$n_cases) / sum(nc$BIR74)          # statewide rate
+
+ggplot(nc) +
+  geom_sf(aes(fill = crude), colour = "grey40", linewidth = 0.1) +
+  scale_fill_distiller(palette = "Reds", direction = 1, name = "Per 1,000\nbirths") +
+  theme_void(base_size = 12)
+```
+
+The picture changes: the large urban counties no longer dominate. The highest
+rates are in small counties such as Anson (15 deaths among 1,570 births,
+9.6 per 1,000) and Northampton, against a statewide rate of about 2.0.
+Rates built on so few births are unstable.
 ---
 
 # Measures of disease frequency
@@ -244,6 +271,20 @@ pa_rate <- 1e5 * sum(county$O) / sum(county$pop)               # statewide
 pa_rate
 ```
 
+```{r}
+#| label: fig-crude-map
+#| fig-height: 4.5
+#| fig-cap: "Crude lung cancer incidence per 100,000, Pennsylvania 2002 (quantile classes)."
+
+pa_map <- pa |> left_join(county, by = "county")
+
+ggplot(pa_map) +
+  geom_sf(aes(fill = cut(crude, quantile(crude, 0:5 / 5), include.lowest = TRUE)),
+          colour = "white", linewidth = 0.2) +
+  scale_fill_brewer(palette = "YlOrRd", name = "Per 100,000") +   # sequential
+  theme_void()
+```
+
 ## What the crude rate is really measuring
 
 Lung cancer risk rises steeply with age. The stratum-specific rates show how
@@ -277,20 +318,19 @@ ggplot(county, aes(p60, crude)) +
 
 The association is modest (r ≈ 0.3) --- smoking and other exposures vary too
 --- but it is enough to reorder counties, as we will see. Comparing crude rates
-thus confounds risk with demography.
-Standardization removes that confounding, in one of two ways.
+thus confounds risk with demography. Standardization removes that confounding;
+here we use the indirect method, which gives the SMR.
 
 
 ---
 
-# Indirect standardization and expected counts
+# Expected counts and the SMR
 
 ## Expected counts
 
-Reverse the logic. Instead of applying local rates to a standard population,
-apply **reference rates** $r_j$ to the **local population** $n_{ij}$. The
-result is the number of cases area $i$ *would have had* if each of its strata
-experienced the reference risk:
+Ask how many cases each county *would have had* if every stratum in it
+experienced the statewide risk. Apply the **reference rates** $r_j$ to the
+**local population** $n_{ij}$:
 
 $$
 E_i = \sum_j r_j\, n_{ij}, \qquad r_j = \frac{\sum_i O_{ij}}{\sum_i n_{ij}} .
@@ -386,67 +426,7 @@ ggplot(pa_map) +
 
 ---
 
-# Direct standardization
-
-## The idea
-
-Ask: *what would each county's rate be if it had the age structure of a
-common standard population?* Apply the county's own stratum-specific rates
-$r_{ij}$ to a fixed set of standard weights $w_j$:
-
-$$
-\text{DSR}_i = \sum_j r_{ij}\, w_j, \qquad \sum_j w_j = 1 .
-$$
-
-The standard can be the study population (here, Pennsylvania), an external one
-(the US 2000 standard population is common in US reporting), or any other
-fixed reference. Its choice changes the level of the DSRs; it rarely changes
-their ordering much.
-
-```{r}
-#| label: direct
-
-std <- d |>
-  group_by(age) |>
-  summarise(w = sum(population)) |>
-  mutate(w = w / sum(w))                        # PA age structure
-
-cells <- d |>
-  group_by(county, age) |>
-  summarise(cases = sum(cases), pop = sum(population), .groups = "drop") |>
-  mutate(r = cases / pop)                       # county x age rates
-
-dsr <- cells |>
-  left_join(std, by = "age") |>
-  group_by(county) |>
-  summarise(dsr = 1e5 * sum(r * w))
-
-county <- county |> left_join(dsr, by = "county")
-```
-
-We standardized by age only, four strata. With all 16 strata, many cells would
-hold one or two people of "other" race aged 70+ in a rural county.
-
-## The weakness for small areas
-
-Direct standardization needs a **stable rate in every stratum of every area**.
-
-```{r}
-#| label: sparse-cells
-
-cells |>
-  group_by(age) |>
-  summarise(counties_with_under_5_cases = sum(cases < 5))
-```
-
-Almost every county has fewer than five cases under 40, and a dozen more are
-that sparse at 40--59. The under-40 cells matter little here only because their
-rate is tiny; in general the DSR inherits the noise of its sparsest strata. This is why direct standardization
-dominates national and state reporting --- large populations, published
-stratum rates --- while disease mapping relies on the indirect method.
-
-
-## Crude versus standardized
+# Crude rate versus SMR
 
 The ranking of counties changes once age is accounted for:
 
@@ -469,31 +449,23 @@ SIR ranks among the highest once its younger and more diverse population is acco
 ```{r}
 #| label: fig-crude-vs-std
 #| fig-height: 4
-#| fig-cap: "Left: crude rate vs. SIR. Right: indirect vs. direct standardization."
+#| fig-cap: "Crude rate vs. SIR, coloured by the share of the population aged 60+."
 
-q1 <- ggplot(county, aes(crude, SIR)) +
+ggplot(county, aes(crude, SIR)) +
   geom_point(aes(colour = p60), size = 2) +
   scale_colour_viridis_c(labels = scales::percent, name = "Aged 60+") +
   geom_hline(yintercept = 1, linetype = "dashed") +
   labs(x = "Crude rate per 100,000", y = "SIR")
-
-q2 <- ggplot(county, aes(dsr, SIR * pa_rate)) +
-  geom_abline(linetype = "dashed") +
-  geom_point(colour = "steelblue", size = 2) +
-  labs(x = "Directly standardized rate", y = "Indirectly standardized rate")
-
-q1 | q2
 ```
 
-The two standardizations agree closely here because the standard population
-and the study population are the same. They will not always.
+At a given crude rate, older counties (yellow) sit lower on the SIR axis: part
+of their excess was expected from age alone.
 
 ::: {.callout-important}
 ## Strictly, SIRs compare each area to the reference --- not to each other
-Each $E_i$ is built on area $i$'s own population weights, so two SIRs are
-comparable only insofar as the stratum-specific rate ratios are roughly
-constant across strata. DSRs share a single set of weights and are directly
-comparable. In practice we map SIRs anyway, and the Bayesian models of Weeks
+Each $E_i$ is built on area $i$'s own population structure, so two SIRs are
+strictly comparable only if the excess risk is roughly the same across age,
+sex, and race groups. In practice we map SIRs anyway, and the Bayesian models of Weeks
 8--9 are built on $O_i$ and $E_i$; just do not over-read small differences
 between neighbouring counties.
 :::
@@ -530,14 +502,9 @@ nearly every county.
 ---
 
 # At home exercise: fifteen minutes {.unnumbered}
-
-1. Recompute the expected counts standardizing by **age only** (four reference
-   rates instead of sixteen). Which three counties change SIR the most, and
-   what do they have in common? (Hint: look at `race`.)
-2. For Lehigh and Northampton, write one sentence each interpreting the SIR,
+1. For Lehigh and Northampton, write one sentence each interpreting the SIR,
    with its interval, for a county health officer.
-3. Name one county whose SIR you would *not* put in a press release, and say why
-   in one sentence.
+2. Name one county whose SIR you would *not* put in a press release, and say why in one sentence.
 
 
 # Key takeaways {.unnumbered}
@@ -547,17 +514,8 @@ nearly every county.
 2. A count map is a population map. Divide by the population at risk, and know
    whether that denominator is people, births, or person-time.
 3. Crude rates confound risk with demographic structure.
-4. Direct standardization applies local rates to a standard population: DSRs
-   are mutually comparable but need stable stratum rates in every area.
-5. Indirect standardization applies reference rates to the local population:
-   $E_i$ needs only local population counts, which is why disease mapping runs
-   on $O_i$ and $E_i$.
-6. $\text{SIR}_i = O_i / E_i$; its precision depends on $E_i$, which varies
+5. $\text{SIR}_i = O_i / E_i$; its precision depends on $E_i$, which varies
    by orders of magnitude across areas.
-
-Exercise 4, Part A asks you to aggregate cases, compute crude rates, derive
-expected counts from population strata, and map and interpret the SIR. Full
-marks go to a correct $E_i$ and an honest interpretation, not to the map.
 
 # References {.unnumbered}
 
